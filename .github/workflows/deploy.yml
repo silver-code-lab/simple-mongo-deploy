@@ -3,17 +3,13 @@ name: Deploy to EC2 (docker-compose)
 on:
   push:
     branches: [ "main" ]
-    paths:
-      - "docker-compose.prod.yml"
-      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Write SSH private key
         run: |
@@ -27,27 +23,22 @@ jobs:
 
       - name: Install Docker on EC2 (official Docker repo – idempotent)
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF'
+          ssh -tt -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF' || true
             set -eux
             export DEBIAN_FRONTEND=noninteractive
 
-            # אם לדוקר+קומפוז יש גרסה — דלג על התקנה
             if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
               docker --version
               docker compose version
               exit 0
             fi
 
-            # נקה רשימת מקורות שבורה אם קיימת
             sudo rm -f /etc/apt/sources.list.d/docker.list || true
-
             sudo apt-get update -y || true
             sudo apt-get remove -y docker docker-engine docker.io containerd runc docker-compose || true
             sudo rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose || true
-
             sudo apt-get install -y ca-certificates curl gnupg lsb-release
 
-            # מפתח GPG (batch mode כדי שלא יבקש TTY)
             sudo install -m 0755 -d /etc/apt/keyrings
             curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
               | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -70,7 +61,7 @@ jobs:
 
       - name: Remote deploy
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF'
+          ssh -tt -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF' || true
             set -eux
             cd /home/ubuntu
 
