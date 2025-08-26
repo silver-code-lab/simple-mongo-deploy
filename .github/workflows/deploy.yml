@@ -26,25 +26,35 @@ jobs:
           scp -o StrictHostKeyChecking=no -i key.pem docker-compose.prod.yml \
             ubuntu@${{ secrets.EC2_HOST }}:/home/ubuntu/docker-compose.prod.yml
 
-      # התקנה יציבה של Docker + Compose V2 מהריפו הרשמי של Docker
+      # התקנה נקייה ויציבה של Docker + Compose V2 מהריפו הרשמי (תיקון ה-deb)
       - name: Install Docker on EC2 (official Docker repo)
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF'
             set -eux
 
-            # הסרה של כל שריד ישן
+            # ניקוי ישן
             sudo apt-get update -y
             sudo apt-get remove -y docker docker-engine docker.io containerd runc docker-compose || true
             sudo rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose || true
+            sudo rm -f /etc/apt/sources.list.d/docker.list || true
 
-            # פרה-רקוויזיטים + הוספת ריפו רשמי של Docker
+            # פרה-רקוויזיטים
             sudo apt-get install -y ca-certificates curl gnupg
+
+            # מפתח וריפו רשמי של Docker
             sudo install -m 0755 -d /etc/apt/keyrings
             curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-            echo "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(. /etc/os-release; echo \$VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+            ARCH=$(dpkg --print-architecture)
+            CODENAME=$( . /etc/os-release && echo "$VERSION_CODENAME" )
+            echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${CODENAME} stable" \
+            | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+            # וידוא שהשורה תקינה
+            cat /etc/apt/sources.list.d/docker.list
 
             sudo apt-get update -y
-            # התקנה של Docker + Compose V2 + Buildx
             sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
             sudo systemctl enable --now docker || true
