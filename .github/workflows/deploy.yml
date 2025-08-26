@@ -2,8 +2,11 @@ name: Deploy to EC2 (docker-compose)
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
+    paths:
+      - "docker-compose.prod.yml"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -13,27 +16,57 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # נכתוב את המפתח מתוך הסיקרט SSH_PRIVATE_KEY
       - name: Write SSH private key
         run: |
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > key.pem
           chmod 600 key.pem
 
+      
       - name: Copy compose file to server
         run: |
-          scp -o StrictHostKeyChecking=no -i key.pem docker-compose.prod.yml ubuntu@${{ secrets.EC2_HOST }}:/home/ubuntu/docker-compose.prod.yml
+          scp -o StrictHostKeyChecking=no -i key.pem docker-compose.prod.yml \
+            ubuntu@${{ secrets.EC2_HOST }}:/home/ubuntu/docker-compose.prod.yml
 
-      - name: Install Docker on EC2
+      
+      - name: Install Docker on EC2 (Docker + Compose V2)
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} << 'EOSSH'
-            set -e
-            sudo apt update -y
-            sudo apt install -y docker.io docker-compose
-            sudo systemctl enable docker
-            sudo systemctl start docker
-          EOSSH
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF'
+            set -eux
+            sudo apt-get update -y
+            
+            sudo apt-get remove -y docker-compose || true
+            sudo rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose || true
 
+            
+            sudo apt-get install -y docker.io docker-compose-plugin
+            sudo systemctl enable --now docker || true
+          
+            sudo usermod -aG docker ubuntu || true
+
+            docker --version
+            docker compose version
+          EOF
+
+      
       - name: Remote deploy
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} << 'EOSSH'
-            docker-compose -f /home/ubuntu/docker-compose.prod.yml up -d --build
-          EOSSH
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF'
+            set -eux
+            cd /home/ubuntu
+
+            
+            if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+              echo "${DOCKERHUB_TOKEN}" | sudo docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
+            fi
+
+            sudo docker compose -f docker-compose.prod.yml pull
+            sudo docker compose -f docker-compose.prod.yml up -d
+            sudo docker compose -f docker-compose.prod.yml ps
+
+            
+            curl -sf http://127.0.0.1:8000/health || true
+          EOF
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
