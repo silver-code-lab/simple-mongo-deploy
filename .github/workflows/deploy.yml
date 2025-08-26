@@ -35,5 +35,5 @@ jobs:
       - name: Remote deploy
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} << 'EOSSH'
-            docker compose -f /home/ubuntu/docker-compose.prod.yml up -d --build
+            docker-compose -f /home/ubuntu/docker-compose.prod.yml up -d --build
           EOSSH
