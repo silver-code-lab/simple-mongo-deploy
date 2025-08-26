@@ -16,46 +16,50 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # נכתוב את המפתח מתוך הסיקרט SSH_PRIVATE_KEY
       - name: Write SSH private key
         run: |
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > key.pem
           chmod 600 key.pem
 
-      
       - name: Copy compose file to server
         run: |
           scp -o StrictHostKeyChecking=no -i key.pem docker-compose.prod.yml \
             ubuntu@${{ secrets.EC2_HOST }}:/home/ubuntu/docker-compose.prod.yml
 
-      
-      - name: Install Docker on EC2 (Docker + Compose V2)
+      # התקנה יציבה של Docker + Compose V2 מהריפו הרשמי של Docker
+      - name: Install Docker on EC2 (official Docker repo)
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF'
             set -eux
+
+            # הסרה של כל שריד ישן
             sudo apt-get update -y
-            
-            sudo apt-get remove -y docker-compose || true
+            sudo apt-get remove -y docker docker-engine docker.io containerd runc docker-compose || true
             sudo rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose || true
 
-            
-            sudo apt-get install -y docker.io docker-compose-plugin
+            # פרה-רקוויזיטים + הוספת ריפו רשמי של Docker
+            sudo apt-get install -y ca-certificates curl gnupg
+            sudo install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            echo "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \$(. /etc/os-release; echo \$VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+            sudo apt-get update -y
+            # התקנה של Docker + Compose V2 + Buildx
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
             sudo systemctl enable --now docker || true
-          
             sudo usermod -aG docker ubuntu || true
 
             docker --version
             docker compose version
           EOF
 
-      
       - name: Remote deploy
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF'
             set -eux
             cd /home/ubuntu
 
-            
             if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
               echo "${DOCKERHUB_TOKEN}" | sudo docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
             fi
@@ -63,8 +67,6 @@ jobs:
             sudo docker compose -f docker-compose.prod.yml pull
             sudo docker compose -f docker-compose.prod.yml up -d
             sudo docker compose -f docker-compose.prod.yml ps
-
-            
             curl -sf http://127.0.0.1:8000/health || true
           EOF
         env:
