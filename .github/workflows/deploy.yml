@@ -25,28 +25,38 @@ jobs:
           scp -o StrictHostKeyChecking=no -i key.pem docker-compose.prod.yml \
             ubuntu@${{ secrets.EC2_HOST }}:/home/ubuntu/docker-compose.prod.yml
 
-      - name: Install Docker on EC2 (official Docker repo)
+      - name: Install Docker on EC2 (official Docker repo – idempotent)
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF'
             set -eux
+            export DEBIAN_FRONTEND=noninteractive
 
-            # מחיקה של הקובץ השבור אם קיים
+            # אם לדוקר+קומפוז יש גרסה — דלג על התקנה
+            if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+              docker --version
+              docker compose version
+              exit 0
+            fi
+
+            # נקה רשימת מקורות שבורה אם קיימת
             sudo rm -f /etc/apt/sources.list.d/docker.list || true
 
             sudo apt-get update -y || true
             sudo apt-get remove -y docker docker-engine docker.io containerd runc docker-compose || true
             sudo rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose || true
 
-            sudo apt-get install -y ca-certificates curl gnupg
+            sudo apt-get install -y ca-certificates curl gnupg lsb-release
 
+            # מפתח GPG (batch mode כדי שלא יבקש TTY)
             sudo install -m 0755 -d /etc/apt/keyrings
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+              | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
             sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
             ARCH=$(dpkg --print-architecture)
             CODENAME=$( . /etc/os-release && echo "$VERSION_CODENAME" )
             echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${CODENAME} stable" \
-            | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+              | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
             sudo apt-get update -y
             sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
