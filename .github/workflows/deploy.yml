@@ -1,63 +1,30 @@
 name: Deploy to EC2 (docker-compose)
 
 on:
-  workflow_dispatch:
   push:
     branches: [ "main" ]
-    paths:
-      - "docker-compose.prod.yml"
-      - ".github/workflows/deploy.yml"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Write SSH private key
         run: |
-          echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > key.pem
           chmod 600 key.pem
 
       - name: Copy compose file to server
         run: |
-          scp -o StrictHostKeyChecking=no -i key.pem docker-compose.prod.yml \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/docker-compose.prod.yml
+          scp -o StrictHostKeyChecking=no -i key.pem docker-compose.prod.yml ubuntu@${{ secrets.EC2_HOST }}:/home/ubuntu/docker-compose.prod.yml
 
       - name: Remote deploy
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} '
-            set -e
-
-            # Install Docker if missing
-            if ! command -v docker >/dev/null 2>&1; then
-              curl -fsSL https://get.docker.com | sh
-              sudo usermod -aG docker $USER || true
-            fi
-
-            # Install Compose plugin if missing
-            if ! docker compose version >/dev/null 2>&1; then
-              sudo mkdir -p /usr/local/lib/docker/cli-plugins
-              sudo curl -SL https://github.com/docker/compose/releases/download/v2.28.1/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose
-              sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-            fi
-
-            # (Optional) docker login if secrets provided
-            if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-              echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-            fi
-
-            docker compose -f ~/docker-compose.prod.yml pull
-            docker compose -f ~/docker-compose.prod.yml up -d
-
-            # Health check
-            for i in {1..30}; do
-              if curl -fsS http://127.0.0.1:8000/health | grep -q "ok"; then
-                echo "App is healthy ✅"
-                exit 0
-              fi
-              echo "Waiting... ($i)"; sleep 3
-            done
-            echo "Health check failed ❌"; docker compose -f ~/docker-compose.prod.yml ps; exit 1
-          '
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} << 'REMOTE'
+            docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" -p "${{ secrets.DOCKERHUB_TOKEN }}"
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/simple-mongo-app:latest
+            docker compose -f docker-compose.prod.yml up -d
+          REMOTE
