@@ -11,7 +11,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -26,22 +25,20 @@ jobs:
           scp -o StrictHostKeyChecking=no -i key.pem docker-compose.prod.yml \
             ubuntu@${{ secrets.EC2_HOST }}:/home/ubuntu/docker-compose.prod.yml
 
-      # התקנה נקייה ויציבה של Docker + Compose V2 מהריפו הרשמי (תיקון ה-deb)
       - name: Install Docker on EC2 (official Docker repo)
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF'
             set -eux
 
-            # ניקוי ישן
-            sudo apt-get update -y
-            sudo apt-get remove -y docker docker-engine docker.io containerd runc docker-compose || true
-            sudo rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose || true
+            # מחיקה של הקובץ השבור אם קיים
             sudo rm -f /etc/apt/sources.list.d/docker.list || true
 
-            # פרה-רקוויזיטים
+            sudo apt-get update -y || true
+            sudo apt-get remove -y docker docker-engine docker.io containerd runc docker-compose || true
+            sudo rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose || true
+
             sudo apt-get install -y ca-certificates curl gnupg
 
-            # מפתח וריפו רשמי של Docker
             sudo install -m 0755 -d /etc/apt/keyrings
             curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
             sudo chmod a+r /etc/apt/keyrings/docker.gpg
@@ -50,9 +47,6 @@ jobs:
             CODENAME=$( . /etc/os-release && echo "$VERSION_CODENAME" )
             echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${CODENAME} stable" \
             | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-            # וידוא שהשורה תקינה
-            cat /etc/apt/sources.list.d/docker.list
 
             sudo apt-get update -y
             sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
