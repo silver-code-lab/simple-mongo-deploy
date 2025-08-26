@@ -1,32 +1,24 @@
+version: "3.9"
 services:
   app:
     image: artium777/simple-mongo-app:latest
-    container_name: simple-mongo-app
-    environment:
-      - MONGO_URL=mongodb://mongo:27017/people
     ports:
       - "8000:8000"
     depends_on:
-      mongo:
-        condition: service_healthy
+      - mongo
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health | grep -q 'ok'"]
+      test: ["CMD", "python", "-c", "import sys, json, urllib.request as u; sys.exit(0 if json.load(u.urlopen('http://127.0.0.1:8000/health'))['status']=='ok' else 1)"]
       interval: 10s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   mongo:
     image: mongo:7
-    container_name: simple-mongo-mongo
+    ports:
+      - "27017:27017"
     volumes:
       - mongo_data:/data/db
-    healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
 
 volumes:
   mongo_data:
