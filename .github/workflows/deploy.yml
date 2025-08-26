@@ -2,7 +2,8 @@ name: Deploy to EC2 (docker-compose)
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
 
 jobs:
   deploy:
@@ -21,10 +22,18 @@ jobs:
         run: |
           scp -o StrictHostKeyChecking=no -i key.pem docker-compose.prod.yml ubuntu@${{ secrets.EC2_HOST }}:/home/ubuntu/docker-compose.prod.yml
 
+      - name: Install Docker on EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} << 'EOSSH'
+            set -e
+            sudo apt update -y
+            sudo apt install -y docker.io docker-compose-plugin
+            sudo systemctl enable docker
+            sudo systemctl start docker
+          EOSSH
+
       - name: Remote deploy
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} << 'REMOTE'
-            docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" -p "${{ secrets.DOCKERHUB_TOKEN }}"
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/simple-mongo-app:latest
-            docker compose -f docker-compose.prod.yml up -d
-          REMOTE
+          ssh -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} << 'EOSSH'
+            docker compose -f /home/ubuntu/docker-compose.prod.yml up -d --build
+          EOSSH
