@@ -1,4 +1,4 @@
-# (no "version:" key needed with Compose v2)
+
 services:
   mongo:
     image: mongo:7
