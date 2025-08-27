@@ -34,21 +34,21 @@ jobs:
           if ! command -v docker >/dev/null 2>&1; then
             curl -fsSL https://get.docker.com | sh
             sudo usermod -aG docker ubuntu
-            echo "Docker installed and ubuntu user added to docker group."
           fi
           docker --version
           docker compose version || true
           SSH
 
-      - name: Remote deploy
+      - name: Remote deploy (pin to current commit SHA)
         run: |
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ubuntu@${{ secrets.EC2_HOST }} <<'SSH'
           set -euo pipefail
           FILE=/home/ubuntu/docker-compose.prod.yml
-          if [ ! -f "$FILE" ]; then
-            echo "compose file not found at $FILE"; exit 1
-          fi
-          # Image is public, docker login not required.
+          [ -f "$FILE" ] || { echo "compose file not found at $FILE"; exit 1; }
+
+          # Pass the GitHub commit SHA into compose as env for image tag substitution
+          export GIT_SHA='${{ github.sha }}'
+
           docker compose -f "$FILE" pull
           docker compose -f "$FILE" up -d
           docker compose -f "$FILE" ps

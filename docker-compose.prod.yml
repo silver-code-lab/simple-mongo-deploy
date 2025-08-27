@@ -1,23 +1,29 @@
+# (no "version:" key needed with Compose v2)
 services:
-  app:
-    image: artium777/simple-mongo-app:latest
-    ports:
-      - "8000:8000"
-    depends_on:
-      - mongo
+  mongo:
+    image: mongo:7
+    volumes: ["mongo_data:/data/db"]
+    restart: always
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys, json, urllib.request as u; sys.exit(0 if json.load(u.urlopen('http://127.0.0.1:8000/health'))['status']=='ok' else 1)"]
+      test: ["CMD", "mongosh", "--quiet", "localhost:27017", "--eval", "db.runCommand({ ping: 1 }).ok"]
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 10s
 
-  mongo:
-    image: mongo:7
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
+  app:
+    image: artium777/simple-mongo-app:${GIT_SHA}
+    ports: ["8000:8000"]
+    environment:
+      MONGO_URL: "mongodb://mongo:27017"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 2s
+      retries: 5
 
 volumes:
   mongo_data:
