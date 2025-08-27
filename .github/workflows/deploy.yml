@@ -1,79 +1,56 @@
 name: Deploy to EC2 (docker-compose)
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main" ]
-  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Write SSH private key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > key.pem
-          chmod 600 key.pem
+          test -n "$SSH_PRIVATE_KEY"
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/key.pem
+          chmod 600 ~/.ssh/key.pem
 
       - name: Copy compose file to server
         run: |
-          scp -o StrictHostKeyChecking=no -i key.pem docker-compose.prod.yml \
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/key.pem \
+            docker-compose.prod.yml \
             ubuntu@${{ secrets.EC2_HOST }}:/home/ubuntu/docker-compose.prod.yml
 
       - name: Install Docker on EC2 (official Docker repo – idempotent)
         run: |
-          ssh -tt -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF' || true
-            set -eux
-            export DEBIAN_FRONTEND=noninteractive
-
-            if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-              docker --version
-              docker compose version
-              exit 0
-            fi
-
-            sudo rm -f /etc/apt/sources.list.d/docker.list || true
-            sudo apt-get update -y || true
-            sudo apt-get remove -y docker docker-engine docker.io containerd runc docker-compose || true
-            sudo rm -f /usr/local/bin/docker-compose /usr/bin/docker-compose || true
-            sudo apt-get install -y ca-certificates curl gnupg lsb-release
-
-            sudo install -m 0755 -d /etc/apt/keyrings
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-              | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
-            sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-            ARCH=$(dpkg --print-architecture)
-            CODENAME=$( . /etc/os-release && echo "$VERSION_CODENAME" )
-            echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${CODENAME} stable" \
-              | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-            sudo apt-get update -y
-            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-            sudo systemctl enable --now docker || true
-            sudo usermod -aG docker ubuntu || true
-
-            docker --version
-            docker compose version
-          EOF
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ubuntu@${{ secrets.EC2_HOST }} <<'SSH'
+          set -e
+          if ! command -v docker >/dev/null 2>&1; then
+            curl -fsSL https://get.docker.com | sh
+            sudo usermod -aG docker ubuntu
+            echo "Docker installed and ubuntu user added to docker group."
+          fi
+          docker --version
+          docker compose version || true
+          SSH
 
       - name: Remote deploy
         run: |
-          ssh -tt -o StrictHostKeyChecking=no -i key.pem ubuntu@${{ secrets.EC2_HOST }} <<'EOF' || true
-            set -eux
-            cd /home/ubuntu
-
-            if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
-              echo "${DOCKERHUB_TOKEN}" | sudo docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
-            fi
-
-            sudo docker compose -f docker-compose.prod.yml pull
-            sudo docker compose -f docker-compose.prod.yml up -d
-            sudo docker compose -f docker-compose.prod.yml ps
-            curl -sf http://127.0.0.1:8000/health || true
-          EOF
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/key.pem ubuntu@${{ secrets.EC2_HOST }} <<'SSH'
+          set -euo pipefail
+          FILE=/home/ubuntu/docker-compose.prod.yml
+          if [ ! -f "$FILE" ]; then
+            echo "compose file not found at $FILE"; exit 1
+          fi
+          # Image is public, docker login not required.
+          docker compose -f "$FILE" pull
+          docker compose -f "$FILE" up -d
+          docker compose -f "$FILE" ps
+          curl -fsS http://127.0.0.1:8000/health || true
+          SSH
